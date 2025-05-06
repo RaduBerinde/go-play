@@ -37,11 +37,16 @@ type StorageConfig struct {
 }
 
 type StoreConfig struct {
-	Attrs           string   `yaml:"attrs" json:"attrs" toml:"attrs"`
-	Size            ByteSize `yaml:"size" json:"size" toml:"size"`
-	BallastSize     ByteSize `yaml:"ballast" json:"ballast" toml:"ballast"`
-	ProvisionedRate string   `yaml:"provisioned-rate" json:"provisioned-rate" toml:"provisioned-rate"`
-	Pebble          string   `toml:"pebble,multiline" json:"pebble" toml:"pebble" comment:"See xyz for details on Pebble options."`
+	Attrs           string                `yaml:"attrs" json:"attrs" toml:"attrs"`
+	Size            ByteSize              `yaml:"size" json:"size" toml:"size"`
+	BallastSize     ByteSize              `yaml:"ballast" json:"ballast" toml:"ballast"`
+	ProvisionedRate string                `yaml:"provisioned-rate" json:"provisioned-rate" toml:"provisioned-rate"`
+	Pebble          []PebbleConfigSection `yaml:"pebble" json:"pebble" toml:"pebble" comment:"See xyz for details on Pebble options."`
+}
+
+type PebbleConfigSection struct {
+	Section  string   `yaml:"section" toml:"section" json:"section"`
+	Settings []string `yaml:"settings" json:"settings" toml:"settings"`
 }
 
 func main() {
@@ -67,14 +72,34 @@ func main() {
 		Size:            100 << 30,
 		BallastSize:     1 << 30,
 		ProvisionedRate: "bandwidth=100",
-		Pebble: `[Level "0"]
-index_block_size=256000000 
-[Level "1"]
-index_block_size=256000000
-target_file_size=2000000
-[Level "2"]
-index_block_size=256000000
-target_file_size=4000000`,
+		//		Pebble: strings.Split(`[Options]
+		//mem_table_stop_writes_threshold=100
+		//[Level "0"]
+		//index_block_size=256000000
+		//[Level "1"]
+		//index_block_size=256000000
+		//target_file_size=2000000
+		//[Level "2"]
+		//index_block_size=256000000
+		//target_file_size=4000000`, "\n"),
+		Pebble: []PebbleConfigSection{
+			{
+				Section:  `Options`,
+				Settings: []string{"mem_table_stop_writes_threshold=100"},
+			},
+			{
+				Section:  `Level "0"`,
+				Settings: []string{"index_block_size=256000000"},
+			},
+			{
+				Section:  `Level "1"`,
+				Settings: []string{"index_block_size=256000000", "target_file_size=2000000"},
+			},
+			{
+				Section:  `Level "2"`,
+				Settings: []string{"index_block_size=256000000", "target_file_size=4000000"},
+			},
+		},
 	}
 
 	writeHJSON(c, "out/1-crdb-config.hjson")
