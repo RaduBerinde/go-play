@@ -1,6 +1,7 @@
 package bitpacking
 
 import (
+	"fmt"
 	"math/rand/v2"
 	"testing"
 
@@ -32,14 +33,14 @@ func TestEncode8_BPK8(t *testing.T) {
 func TestEncode16_BPK12(t *testing.T) {
 	// Two 12-bit values: 0x123 and 0x456
 	input := []uint16{0x123, 0x456}
-	output := make([]byte, 3)
+	output := make([]byte, 4)
 	Encode16(input, 12, output)
-	require.Equal(t, []byte{0x23, 0x61, 0x45}, output)
+	require.Equal(t, []byte{0x23, 0x61, 0x45, 0x00}, output)
 
 	input = []uint16{0x123, 0x456, 0x789}
-	output = make([]byte, 6)
+	output = make([]byte, 7)
 	Encode16(input, 12, output)
-	require.Equal(t, []byte{0x23, 0x61, 0x45, 0x89, 0x07, 0x00}, output)
+	require.Equal(t, []byte{0x23, 0x61, 0x45, 0x89, 0x07, 0x00, 0x00}, output)
 }
 
 func TestEncode16_BPK16(t *testing.T) {
@@ -90,7 +91,7 @@ func TestDecode_BPK8(t *testing.T) {
 
 func TestDecode_BPK12(t *testing.T) {
 	// Encoded as: [low8_a=0x23, high4_a|low4_b<<4=0x61, high8_b=0x45]
-	data := []byte{0x23, 0x61, 0x45}
+	data := []byte{0x23, 0x61, 0x45, 0x00}
 
 	got0 := Decode(data, 0, 12)
 	if got0 != 0x123 {
@@ -131,21 +132,89 @@ func TestRoundTrip(t *testing.T) {
 
 		for _, bpk := range []int{4, 8, 12, 16} {
 			encoded := make([]byte, EncodedSize(n, bpk))
+			for i := range encoded {
+				encoded[i] = 0xCC
+			}
 			if bpk <= 8 {
 				Encode8(input8, bpk, encoded)
 			} else {
 				Encode16(input, bpk, encoded)
 			}
 			for i := range input {
-				require.Equal(t, Decode(encoded, uint(i), bpk), input[i]&(1<<bpk-1))
+				require.Equalf(t, Decode(encoded, uint(i), bpk), input[i]&(1<<bpk-1), "bpk=%d", bpk)
 			}
 			for range 10 {
 				a, b, c := rand.IntN(n), rand.IntN(n), rand.IntN(n)
 				va, vb, vc := Decode3(encoded, uint(a), uint(b), uint(c), bpk)
-				require.Equal(t, va, input[a]&(1<<bpk-1))
-				require.Equal(t, vb, input[b]&(1<<bpk-1))
-				require.Equal(t, vc, input[c]&(1<<bpk-1))
+				require.Equalf(t, va, input[a]&(1<<bpk-1), "bpk=%d", bpk)
+				require.Equalf(t, vb, input[b]&(1<<bpk-1), "bpk=%d", bpk)
+				require.Equalf(t, vc, input[c]&(1<<bpk-1), "bpk=%d", bpk)
 			}
 		}
+	}
+}
+
+// Results on an Apple M1:
+//
+// name               Gvals/s
+// Encode/4bpk-10     8.88 ± 2%
+// Encode/8bpk-10     76.4 ± 1%
+// Encode/12bpk-10    4.96 ± 0%
+// Encode/16bpk-10    38.2 ± 2%
+func BenchmarkEncode(b *testing.B) {
+	const size = 10000
+	vals := make([]uint16, size)
+	vals8 := make([]uint8, size)
+	for i := range vals {
+		vals[i] = uint16(rand.Uint32())
+		vals8[i] = uint8(vals[i])
+	}
+	for _, bpk := range []int{4, 8, 12, 16} {
+		b.Run(fmt.Sprintf("%dbpk", bpk), func(b *testing.B) {
+			output := make([]byte, EncodedSize(len(vals), bpk))
+			b.ResetTimer()
+			for range b.N {
+				if bpk <= 8 {
+					Encode8(vals8, bpk, output)
+				} else {
+					Encode16(vals, bpk, output)
+				}
+			}
+			b.ReportMetric(float64(b.N*size)/b.Elapsed().Seconds()/1e9, "Gvals/s")
+		})
+	}
+}
+
+// Results on Apple M1:
+//
+// Decode3/4bpk-10   3.10ns ± 5%
+// Decode3/8bpk-10   2.48ns ± 0%
+// Decode3/12bpk-10  3.84ns ± 3%
+// Decode3/16bpk-10  2.51ns ± 0%
+func BenchmarkDecode3(b *testing.B) {
+	const size = 10000
+	vals := make([]uint16, size)
+	vals8 := make([]uint8, size)
+	for i := range vals {
+		vals[i] = uint16(rand.Uint32())
+		vals8[i] = uint8(vals[i])
+	}
+	for _, bpk := range []int{4, 8, 12, 16} {
+		b.Run(fmt.Sprintf("%dbpk", bpk), func(b *testing.B) {
+			output := make([]byte, EncodedSize(len(vals), bpk))
+			if bpk <= 8 {
+				Encode8(vals8, bpk, output)
+			} else {
+				Encode16(vals, bpk, output)
+			}
+			const batch = 128
+			indexes := make([][3]uint, batch)
+			for i := range indexes {
+				indexes[i] = [3]uint{rand.UintN(size), rand.UintN(size), rand.UintN(size)}
+			}
+			for i := uint(0); b.Loop(); i = (i + 1) % batch {
+				Decode3(output, indexes[i][0], indexes[i][1], indexes[i][2], bpk)
+			}
+		})
 	}
 }
