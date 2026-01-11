@@ -21,6 +21,7 @@ func EncodedSize(n int, bpk int) int {
 	case 8:
 		return n
 	case 12:
+		// See encode12bpk for the packing scheme.
 		return (n+1)/2*3 + 1
 	case 16:
 		return n * 2
@@ -53,6 +54,8 @@ func Encode8(input []uint8, bpk int, output []byte) {
 	}
 }
 
+// encode4bpk packs uint8 values into bytes using 4 bits per key; two values are
+// packed in each byte.
 func encode4bpk(input []uint8, output []byte) {
 	_ = output[(len(input)+1)/2-1]
 	if len(input) >= 8 {
@@ -86,10 +89,10 @@ func encode4bpk(input []uint8, output []byte) {
 // Encode16 packs uint16 values into bytes using the specified bits-per-key
 // (bpk). When bpk < 16, the lower bpk bits of each value are used.
 //
-// Panics if bpk is not 12 or 16.
-//
 // Exactly EncodedSize(len(input), bpk) bytes of the output buffer will be
 // written; the buffer must be at least as big.
+//
+// Only bpk values 12 and 16 are supported.
 func Encode16(input []uint16, bpk int, output []byte) {
 	if len(input) == 0 {
 		return
@@ -104,6 +107,15 @@ func Encode16(input []uint16, bpk int, output []byte) {
 	}
 }
 
+// encode12bpk packs uint16 values into bytes using 12 bits per key.
+//
+// Two values (a, b) are packed into 3 bytes:
+//   - byte0 = low 8 bits of a
+//   - byte1 = high 4 bits of a (low nibble) | low 4 bits of b (high nibble)
+//   - byte2 = high 8 bits of b
+//
+// We leave a padding byte at the end so that we can use 32-bit reads (see
+// Decode).
 func encode12bpk(input []uint16, output []byte) {
 	// We always pad with an extra 0 byte so we can do 32-bit reads and writes.
 	_ = output[(len(input)+1)/2*3]
